@@ -160,36 +160,38 @@ mcmcConf <- configureMCMC(model)
 # Block sampler for beta_0, log(\beta_{jk}), and \beta_{\sigma}
 # MCMC may work better including psi in this blocking
 # Some models (1,4,7) won't have beta_sigma
-mcmcConf$removeSamplers(c("beta_0",'log_beta','beta_sigma'))
-mcmcConf$addSampler(target = c("beta_0",'log_beta',"beta_sigma"), type = 'RW_block')
-
+mcmcConf$removeSamplers(c("beta_0",'log_beta',"psi","sig2_psi",'beta_sigma'))
+# mcmcConf$addSampler(target = c("beta_0",'log_beta',"beta_sigma"), type = 'RW_block')
+mcmcConf$addSampler(target = c("beta_0",'log_beta',"psi","sig2_psi",'beta_sigma'), 
+                    type = 'AF_slice')
+# 
 # May need to change depending on model
 # For example, models 1, 4, and 7 will have "sigma2" instead of "beta_sigma"
 # For example, models 1, 2, and 3 will not have "psi"
 
 mcmcConf$addMonitors(c('beta_0','beta','beta_sigma','psi',"sig2_psi"))
 
-# mcmcConf$enableWAIC = TRUE
+mcmcConf$enableWAIC = TRUE
 codeMCMC <- buildMCMC(mcmcConf)
 Cmodel = compileNimble(codeMCMC,model)
 
 ##### Run a super long MCMC
 ##### thin so that we get 10,000 posterior samples -- saves memory
 
-n_tot = 800e3
-n_burn = 500e3
+n_tot = 15e3
+n_burn = 5e3
 n_post = n_tot - n_burn
 
 
 # You may get some warnings because we didn't initialize log_V where Z = 1.
+st = proc.time()
 post_samples <- runMCMC(Cmodel$codeMCMC,niter = n_tot,nburnin = n_burn,
-                        thin = n_post/10000)
+                        thin = 1)
+elapsed = proc.time() - st
 
 
 
 ##### A few trace plot
-plot(post_samples[,"beta_0"],type= "l")
-
 plot(post_samples[,"beta_0"],type= "l")
 plot(post_samples[,"log_beta[9]"],type= "l")
 plot(post_samples[,"beta[9]"],type= "l")

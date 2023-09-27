@@ -3,20 +3,43 @@ library(fields)
 library(splines2)
 library(nimble)
 library(vegan)
+library(gdm)
+library(sf)
+library(tidyverse)
+
 rm(list = ls())
 
 #----------------------------------------------------------------
 # load in and parse data
 #----------------------------------------------------------------
 
-panama_data = read.csv("../data/Panama_species.csv")[,-1]
-panama_env = read.csv("../data/Panama_env.csv")
+data(southwest)
 
 # Parse data into location, environmental variables, and cover/presence data
 
-location_mat = panama_env[,2:3] 
-envr_use = panama_env[,4:5] 
-species_mat = panama_data
+tmp = sf::sf_project(from = "EPSG:4326", to = "EPSG:32651", 
+                     cbind( southwest$Long,southwest$Lat))
+
+## Eastings and Northings
+
+southwest$x = tmp[,1]/1000. 
+southwest$y = tmp[,2]/1000
+southwest$present = 1
+sppData = southwest[c(1,2,15,16)] 
+envTab = southwest[c(2:12)] 
+
+# sitePairTab = formatsitepair(sppData,2,XColumn="x",YColumn="y",sppColumn="species", 
+#                              siteColumn="site",predData=envTab)
+
+south_block = southwest%>% 
+  group_by(site,x,y,phTotal,bio5,bio19,species) %>%
+  dplyr::summarize(isPresent = mean(present)) %>% 
+  spread(species, isPresent,fill = 0) #%>% 
+
+
+location_mat = south_block[,2:3] 
+envr_use = south_block[,4:6] 
+species_mat = south_block[,-(1:6)]
 
 # save number of sites
 
@@ -49,7 +72,7 @@ mean(Z == 1)
 
 # Calculate geographical distance in km
 
-dist_mat = as.matrix(rdist(cbind(location_mat$EW.coord,location_mat$NS.coord))/1e3)
+dist_mat = as.matrix(rdist(cbind(location_mat$x,location_mat$y)))
 vec_distance = dist_mat[upper.tri(dist_mat)]
 
 # Define X to be environmental variables or a subset of them.
@@ -163,6 +186,9 @@ mcmcConf <- configureMCMC(model)
 mcmcConf$removeSamplers(c("beta_0",'log_beta','beta_sigma'))
 mcmcConf$addSampler(target = c("beta_0",'log_beta',"beta_sigma"), type = 'RW_block')
 
+mcmcConf$removeSamplers(c("psi"))
+mcmcConf$addSampler(target = c("psi"), type = 'ess')
+
 # May need to change depending on model
 # For example, models 1, 4, and 7 will have "sigma2" instead of "beta_sigma"
 # For example, models 1, 2, and 3 will not have "psi"
@@ -189,11 +215,9 @@ post_samples <- runMCMC(Cmodel$codeMCMC,niter = n_tot,nburnin = n_burn,
 
 ##### A few trace plot
 plot(post_samples[,"beta_0"],type= "l")
-
-plot(post_samples[,"beta_0"],type= "l")
 plot(post_samples[,"log_beta[9]"],type= "l")
 plot(post_samples[,"beta[9]"],type= "l")
 
 plot(post_samples[,"beta_sigma[2]"],type= "l")
-plot(post_samples[,"psi[2]"],type= "l")
+plot(post_samples[,"psi[1]"],type= "l")
 plot(post_samples[,"sig2_psi"],type= "l")
