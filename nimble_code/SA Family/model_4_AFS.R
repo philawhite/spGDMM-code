@@ -3,20 +3,21 @@ library(fields)
 library(splines2)
 library(nimble)
 library(vegan)
+library(geosphere)
+
 rm(list = ls())
 
 #----------------------------------------------------------------
 # load in and parse data
 #----------------------------------------------------------------
 
-panama_data = read.csv("../data/Panama_species.csv")[,-1]
-panama_env = read.csv("../data/Panama_env.csv")
+dat_all = read.csv("../../data/sa_family_data.csv")
 
 # Parse data into location, environmental variables, and cover/presence data
 
-location_mat = panama_env[,2:3] 
-envr_use = panama_env[,4:5] 
-species_mat = panama_data
+location_mat = dat_all[,1:3] 
+envr_use = dat_all[,c(4,5,8,9,10,11,12)] 
+species_mat = dat_all[,-(1:12)] 
 
 # save number of sites
 
@@ -49,7 +50,7 @@ mean(Z == 1)
 
 # Calculate geographical distance in km
 
-dist_mat = as.matrix(rdist(cbind(location_mat$EW.coord,location_mat$NS.coord))/1e3)
+dist_mat = distm(cbind(location_mat$longitude,location_mat$latitude))/1e3
 vec_distance = dist_mat[upper.tri(dist_mat)]
 
 # Define X to be environmental variables or a subset of them.
@@ -58,10 +59,10 @@ vec_distance = dist_mat[upper.tri(dist_mat)]
 # Remember that in the specification, of the iSpline that the degree is
 # one higher that what you say. Integration of m-spline adds one degree.
 
-X = envr_use
-
+X = envr_use[,c("gmap","RFL_CONC","Elevation30m","HeatLoadIndex30m","tmean13c",
+                "SoilConductivitymSm","SoilTotalNPercent")]
 deg = 3
-knots = 1
+knots = 2
 df_use = deg + knots
 
 formula_use = as.formula(paste("~ 0 +",paste(
@@ -107,7 +108,7 @@ lm_mod= lm(log(Z) ~ X_GDM)
 
 lm_out = optim(c(.3, ifelse(coef(lm_mod)[-1]> 0,log(coef(lm_mod)[-1]), -10),rnorm(ns)) ,function(par){
   sum((log(Z) - par[1] - X_GDM %*% exp(par[2:(p + 1)]) -
-         (par[p+1+row_ind] - par[p+1 + col_ind])^2 )^2)
+         abs(par[p+1+row_ind] - par[p+1 + col_ind]) )^2)
 },method = "BFGS")
 
 #------------------------------------------------------------------------
@@ -129,7 +130,7 @@ p_sigma = ncol(X_sigma)
 # Source nimble models -- Models 1-9 match those in paper
 #------------------------------------------------------------------------
 
-source("nimble_models.R")
+source("../nimble_models.R")
 
 # create constants for nimble model
 
@@ -151,49 +152,59 @@ inits <- list(beta_0 = lm_out$par[1],
               beta_sigma = c(-5,-20,12,2),
               psi = lm_out$par[-(1:(p+1))])
 
-#### "nimble_code8" is model 8 in paper. Change to what you want in nimble_models.R.
+#### "nimble_code4" is model 4 in paper. Change to what you want in nimble_models.R.
 
-model <- nimbleModel(nimble_code8, constants = constants, data = data, inits = inits)
+model <- nimbleModel(nimble_code4, constants = constants, data = data, inits = inits)
 
 mcmcConf <- configureMCMC(model)
 
 # Block sampler for beta_0, log(\beta_{jk}), and \beta_{\sigma}
 # MCMC may work better including psi in this blocking
 # Some models (1,4,7) won't have beta_sigma
-mcmcConf$removeSamplers(c("beta_0",'log_beta','beta_sigma'))
-mcmcConf$addSampler(target = c("beta_0",'log_beta',"beta_sigma"), type = 'RW_block')
-
+mcmcConf$removeSamplers(c("beta_0",'log_beta',"psi","sig2_psi",'sigma2'))
+# mcmcConf$addSampler(target = c("beta_0",'log_beta',"sigma2"), type = 'RW_block')
+mcmcConf$addSampler(target = c("beta_0",'log_beta',"psi","sig2_psi",'sigma2'), 
+                    type = 'AF_slice')
+# 
 # May need to change depending on model
 # For example, models 1, 4, and 7 will have "sigma2" instead of "beta_sigma"
 # For example, models 1, 2, and 3 will not have "psi"
+### Here, beta represents beta* discussed in the supplement, the product of alpha_k and \beta_{k,j}
 
-mcmcConf$addMonitors(c('beta_0','beta','beta_sigma','psi',"sig2_psi"))
+mcmcConf$addMonitors(c('beta_0','beta','sigma2','psi',"sig2_psi"))
 
-# mcmcConf$enableWAIC = TRUE
+mcmcConf$enableWAIC = TRUE
 codeMCMC <- buildMCMC(mcmcConf)
 Cmodel = compileNimble(codeMCMC,model)
 
 ##### Run a super long MCMC
 ##### thin so that we get 10,000 posterior samples -- saves memory
 
-n_tot = 800e3
-n_burn = 500e3
+n_tot = 10e3
+n_burn = 5e3
 n_post = n_tot - n_burn
 
 
 # You may get some warnings because we didn't initialize log_V where Z = 1.
+st = proc.time()
 post_samples <- runMCMC(Cmodel$codeMCMC,niter = n_tot,nburnin = n_burn,
-                        thin = n_post/10000)
+                        thin = 1,WAIC = TRUE)
+elapsed = proc.time() - st
 
+saveRDS(data.frame(model = 4,
+                   time_mins = elapsed[1]/60,
+                   WAIC = post_samples$WAIC$WAIC,
+                   p_WAIC =  post_samples$WAIC$pWAIC,
+                   lppd = post_samples$WAIC$lppd
+                   ),"mod4_sa.rds")
 
+rm(list=ls())
 
-##### A few trace plot
-plot(post_samples[,"beta_0"],type= "l")
-
-plot(post_samples[,"beta_0"],type= "l")
-plot(post_samples[,"log_beta[9]"],type= "l")
-plot(post_samples[,"beta[9]"],type= "l")
-
-plot(post_samples[,"beta_sigma[2]"],type= "l")
-plot(post_samples[,"psi[2]"],type= "l")
-plot(post_samples[,"sig2_psi"],type= "l")
+# ##### A few trace plot
+# plot(post_samples$samples[,"beta_0"],type= "l")
+# plot(post_samples$samples[,"log_beta[9]"],type= "l")
+# plot(post_samples$samples[,"beta[9]"],type= "l")
+# 
+# plot(post_samples$samples[,"beta_sigma[2]"],type= "l")
+# plot(post_samples$samples[,"psi[2]"],type= "l")
+# plot(post_samples$samples[,"sig2_psi"],type= "l")

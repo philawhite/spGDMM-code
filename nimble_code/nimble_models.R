@@ -22,6 +22,7 @@
 # 
 # cExpcov <- compileNimble(expcov)
 
+### Here, beta represents beta* discussed in the supplement, the product of alpha_k and \beta_{k,j}
 
 nimble_code1 <- nimbleCode({
   
