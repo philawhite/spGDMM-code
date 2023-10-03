@@ -359,9 +359,7 @@ for(i in 1:(reps*thin + burn)){
 #   return(out)
 #   
 # },mc.cores = 10)
-elapsed = proc.time() - st
 
-saveRDS(data.frame(model = 1,time_mins = elapsed[1]/60/24,like = log_lik),"mod1_sa.rds")
 
 # out = apply(reduce(mod_out,rbind),2,mean)
 rm(list=ls())

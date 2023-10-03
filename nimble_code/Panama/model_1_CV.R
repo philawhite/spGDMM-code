@@ -3,8 +3,14 @@ library(fields)
 library(splines2)
 library(nimble)
 library(vegan)
+library(parallel)
+library(dplyr)
+library(scoringRules)
 rm(list = ls())
 
+K_fold = 10
+numCores = detectCores()
+seed_list = sample(1:1e9,numCores)
 #----------------------------------------------------------------
 # load in and parse data
 #----------------------------------------------------------------
@@ -21,6 +27,13 @@ species_mat = panama_data
 # save number of sites
 
 ns = nrow(location_mat)
+
+set.seed(1)
+tmp = sample(1:ns)
+ind_loc_hold = lapply(1:K_fold,function(i){
+  idx_keep = which((1:ns)%% K_fold == (i-1))
+  sort(tmp[idx_keep])
+})
 
 #----------------------------------------------------------------
 # Calculate Bray-Curtis dissimilarity -- see proportion of 0's and 1's
@@ -138,40 +151,9 @@ constants <- list(n = N, p = p, x = X_GDM,n_loc = ns,
 
 # create data for nimble model
 
-data <- list(log_V = ifelse(Z == 1,NA, log(Z)),
-             censored = 1*(Z == 1),
-             c = rep(0,constants$n))
-
-# create initial values for nimble model -- this will change depending on model
-
-inits <- list(beta_0 = lm_out$par[1],
-              log_beta = lm_out$par[2:(p+1)],
-              sig2_psi = 1,
-              beta_sigma = c(-5,-20,12,2),
-              psi = lm_out$par[-(1:(p+1))])
-
-#### "nimble_code1" is model 1 in paper. Change to what you want in nimble_models.R.
-
-model <- nimbleModel(nimble_code1, constants = constants, data = data, inits = inits)
-
-mcmcConf <- configureMCMC(model)
-
-# Block sampler for beta_0, log(\beta_{jk}), and \beta_{\sigma}
-# MCMC may work better including psi in this blocking
-# Some models (1,4,7) won't have beta_sigma
-mcmcConf$removeSamplers(c("beta_0",'log_beta','sigma2'))
-# mcmcConf$addSampler(target = c("beta_0",'log_beta',"sigma2"), type = 'RW_block')
-mcmcConf$addSampler(target = c("beta_0",'log_beta','sigma2'), 
-                    type = 'AF_slice')
 # May need to change depending on model
 # For example, models 1, 4, and 7 will have "sigma2" instead of "beta_sigma"
 # For example, models 1, 2, and 3 will not have "psi"
-
-mcmcConf$addMonitors(c('beta_0','beta','sigma2'))
-
-mcmcConf$enableWAIC = TRUE
-codeMCMC <- buildMCMC(mcmcConf)
-Cmodel = compileNimble(codeMCMC,model)
 
 ##### Run a super long MCMC
 ##### thin so that we get 10,000 posterior samples -- saves memory
@@ -182,24 +164,76 @@ n_post = n_tot - n_burn
 
 
 # You may get some warnings because we didn't initialize log_V where Z = 1.
-st = proc.time()
-post_samples <- runMCMC(Cmodel$codeMCMC,niter = n_tot,nburnin = n_burn,
-                        thin = 1,WAIC = TRUE)
-elapsed = proc.time() - st
 
-saveRDS(data.frame(model = 1,
-                   time_mins = elapsed[3]/60,
-                   WAIC = post_samples$WAIC$WAIC,
-                   p_WAIC =  post_samples$WAIC$pWAIC,
-                   lppd = post_samples$WAIC$lppd),
-        "mod1_panama.rds")
 
-rm(list=ls())
+CV_output = sapply(1:K_fold,function(iii){
+  
+  idx_hold = col_ind %in% ind_loc_hold[[iii]] | row_ind %in% ind_loc_hold[[iii]]
+  Z_use = Z
+  
+  Z_hold = Z_use[which(idx_hold)]
+  Z_use[which(idx_hold)] = NA
+  
+  
+  data <- list(log_V = ifelse(Z_use == 1,NA, log(Z_use)),
+               censored = ifelse(idx_hold,NA,1*(Z_use == 1 & !idx_hold)),
+               c = rep(0,constants$n))
+  
+  # create initial values for nimble model -- this will change depending on model
+  
+  inits <- list(beta_0 = lm_out$par[1],
+                log_V = ifelse(is.na(data$log_V),log(Z), NA),
+                log_beta = lm_out$par[2:(p+1)],
+                sig2_psi = 1,
+                beta_sigma = c(-5,-20,12,2),
+                psi = lm_out$par[-(1:(p+1))])
+  
+  #### "nimble_code1" is model 1 in paper. Change to what you want in nimble_models.R.
+  
+  model <- nimbleModel(nimble_code1, constants = constants, data = data, inits = inits)
+  
+  mcmcConf <- configureMCMC(model)
+  
+  
+  
+  # Block sampler for beta_0, log(\beta_{jk}), and \beta_{\sigma}
+  # MCMC may work better including psi in this blocking
+  # Some models (1,4,7) won't have beta_sigma
+  mcmcConf$removeSamplers(c("beta_0",'log_beta','sigma2'))
+  # mcmcConf$addSampler(target = c("beta_0",'log_beta',"sigma2"), type = 'RW_block')
+  mcmcConf$addSampler(target = c("beta_0",'log_beta','sigma2'), 
+                      type = 'AF_slice')
+  
+  mcmcConf$addMonitors(c('beta_0','beta','sigma2',paste0("log_V[",which(idx_hold),"]")))
+  
+  codeMCMC <- buildMCMC(mcmcConf)
+  Cmodel = compileNimble(codeMCMC,model)
+  
+  # Cmodel$setData(y = y.second)
+  
+  post_samples = runMCMC(Cmodel$codeMCMC,niter = n_tot,nburnin = n_burn,
+                         thin = 1,setSeed = seed_list[iii])
+  
+  
+  log_V_preds = post_samples[,which( colnames(post_samples) %in% paste0("log_V[",which(idx_hold),"]"))]
+  
+  Z_preds = apply(log_V_preds,2, function(x){
+    ifelse(x >0,1,exp(x))
+  })
+  
+  pred_mean = apply(Z_preds,2,mean)
+  MSE = mean((Z_hold - pred_mean)^2)
+  MAE = mean(abs(Z_hold - pred_mean))
+  CRPS = mean(crps_sample(Z_hold,t(Z_preds)))
+  
+  #### Add any other criteria you want 
+  return(c(MSE = MSE,MAE = MAE,CRPS = CRPS))
+  
+})
 
-# ##### A few trace plot
-plot(post_samples$samples[,"beta_0"],type= "l")
-plot(post_samples$samples[,"log_beta[9]"],type= "l")
-plot(post_samples$samples[,"beta[9]"],type= "l")
-plot(post_samples$samples[,"beta_sigma[2]"],type= "l")
-plot(post_samples$samples[,"psi[2]"],type= "l")
-plot(post_samples$samples[,"sig2_psi"],type= "l")
+out = apply(CV_output,1,mean)
+out_final = c(out, RMSE = sqrt(out["MSE"]))
+
+### this should be close to but not the same as 
+### the results in Table 1
+out_final

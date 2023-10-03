@@ -191,8 +191,7 @@ post_samples <- runMCMC(Cmodel$codeMCMC,niter = n_tot,nburnin = n_burn,
 elapsed = proc.time() - st
 
 saveRDS(data.frame(model = 7,
-                   time_mins = elapsed[1]/60,
-                   WAIC = post_samples$WAIC$WAIC,
+                   time_mins = elapsed[3]/60,
                    p_WAIC =  post_samples$WAIC$pWAIC,
                    lppd = post_samples$WAIC$lppd
                    ),"mod7_panama.rds")

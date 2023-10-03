@@ -214,7 +214,7 @@ post_samples <- runMCMC(Cmodel$codeMCMC,niter = n_tot,nburnin = n_burn,
 elapsed = proc.time() - st
 
 saveRDS(data.frame(model = 1,
-                   time_mins = elapsed[1]/60,
+                   time_mins = elapsed[3]/60,
                    WAIC = post_samples$WAIC$WAIC,
                    p_WAIC =  post_samples$WAIC$pWAIC,
                    lppd = post_samples$WAIC$lppd

@@ -3,8 +3,12 @@ library(fields)
 library(splines2)
 library(nimble)
 library(vegan)
+library(parallel)
+library(dplyr)
 rm(list = ls())
 
+numCores = 4
+seed_list = sample(1:1e9,numCores)
 #----------------------------------------------------------------
 # load in and parse data
 #----------------------------------------------------------------
@@ -169,7 +173,6 @@ mcmcConf$addSampler(target = c("beta_0",'log_beta','sigma2'),
 
 mcmcConf$addMonitors(c('beta_0','beta','sigma2'))
 
-mcmcConf$enableWAIC = TRUE
 codeMCMC <- buildMCMC(mcmcConf)
 Cmodel = compileNimble(codeMCMC,model)
 
@@ -182,24 +185,15 @@ n_post = n_tot - n_burn
 
 
 # You may get some warnings because we didn't initialize log_V where Z = 1.
-st = proc.time()
-post_samples <- runMCMC(Cmodel$codeMCMC,niter = n_tot,nburnin = n_burn,
-                        thin = 1,WAIC = TRUE)
-elapsed = proc.time() - st
 
-saveRDS(data.frame(model = 1,
-                   time_mins = elapsed[3]/60,
-                   WAIC = post_samples$WAIC$WAIC,
-                   p_WAIC =  post_samples$WAIC$pWAIC,
-                   lppd = post_samples$WAIC$lppd),
-        "mod1_panama.rds")
 
-rm(list=ls())
+post_samples = do.call(rbind,mclapply(1:numCores,function(iii){
+  runMCMC(Cmodel$codeMCMC,niter = n_tot,nburnin = n_burn,
+          thin = 1,setSeed = seed_list[iii])
+},mc.cores = numCores))
+
 
 # ##### A few trace plot
-plot(post_samples$samples[,"beta_0"],type= "l")
-plot(post_samples$samples[,"log_beta[9]"],type= "l")
-plot(post_samples$samples[,"beta[9]"],type= "l")
-plot(post_samples$samples[,"beta_sigma[2]"],type= "l")
-plot(post_samples$samples[,"psi[2]"],type= "l")
-plot(post_samples$samples[,"sig2_psi"],type= "l")
+plot(post_samples[,"beta_0"],type= "l")
+plot(post_samples[,"log_beta[9]"],type= "l")
+plot(post_samples[,"sigma2"],type= "l")

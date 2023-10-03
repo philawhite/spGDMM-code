@@ -32,9 +32,9 @@ nimble_code1 <- nimbleCode({
     log(beta[i]) ~ dnorm(0, var = 100)
   }
   
-  for(i in 1:p_sigma){
-    beta_sigma[i] ~ dnorm(0, var = 100)
-  }
+  # for(i in 1:p_sigma){
+  #   beta_sigma[i] ~ dnorm(0, var = 100)
+  # }
   
   linpred[1:n] <- (x[1:n, 1:p] %*% beta[1:p])[1:n,1]
   sigma2 ~ dinvgamma(1, 1)
@@ -107,9 +107,9 @@ nimble_code4 <- nimbleCode({
     log(beta[i]) ~ dnorm(0, var = 100)
   }
   
-  for(i in 1:p_sigma){
-    beta_sigma[i] ~ dnorm(0, var = 100)
-  }
+  # for(i in 1:p_sigma){
+  #   beta_sigma[i] ~ dnorm(0, var = 100)
+  # }
   
   linpred[1:n] <- (x[1:n, 1:p] %*% beta[1:p])[1:n,1]
   sigma2 ~ dinvgamma(1, 1)
@@ -189,9 +189,9 @@ nimble_code7 <- nimbleCode({
     log(beta[i]) ~ dnorm(0, var = 100)
   }
   
-  for(i in 1:p_sigma){
-    beta_sigma[i] ~ dnorm(0, var = 100)
-  }
+  # for(i in 1:p_sigma){
+  #   beta_sigma[i] ~ dnorm(0, var = 100)
+  # }
   
   linpred[1:n] <- (x[1:n, 1:p] %*% beta[1:p])[1:n,1]
   sigma2 ~ dinvgamma(1, 1)
