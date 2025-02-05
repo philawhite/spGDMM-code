@@ -197,13 +197,133 @@ saveRDS(data.frame(model = 8,
                    lppd = post_samples$WAIC$lppd
                    ),"mod8_panama.rds")
 
-rm(list=ls())
+out = post_samples$samples %>% as_tibble()
+sig2_eta_save = out$sig2_eta
+log_beta_sigma = out$log_beta_sigma
+eta_save = out$eta
+log_beta_save = out$log_beta
+alpha_save = out$alpha
+hist(alpha_save)
 
-# ##### A few trace plot
-# plot(post_samples$samples[,"beta_0"],type= "l")
-# plot(post_samples$samples[,"log_beta[9]"],type= "l")
-# plot(post_samples$samples[,"beta[9]"],type= "l")
-# 
-# plot(post_samples$samples[,"beta_sigma[2]"],type= "l")
-# plot(post_samples$samples[,"psi[2]"],type= "l")
-# plot(post_samples$samples[,"sig2_psi"],type= "l")
+mean(alpha_save)
+quantile(alpha_save,c(.025,.975))
+
+beta_samps = exp(log_beta_save)
+
+
+####### ####### ####### ####### ####### ####### ####### 
+####### Plot variable importance
+####### ####### ####### ####### ####### ####### ####### 
+
+
+
+beta_samps = out %>% dplyr::select(contains("beta["))
+
+envr_names = gsub("I\\d", "",X_GDM %>% colnames()) %>% unique()
+
+tmp = sapply(1:length(envr_names),function(i){
+  
+  bet_now = beta_samps[,(df_use*(i-1)+ 1):(df_use*i)]
+  
+  return(apply(bet_now,1,function(x){
+    sum(x)
+    }))
+  
+})
+
+colnames(tmp) = c(colnames(X_temp),"Distance")
+tmp_long = melt(tmp)
+
+colnames(tmp_long) = c("rep","Covariate","Variable Importance")
+df2 = tmp_long %>%  group_by(Covariate) %>% 
+  dplyr::summarize(mean = mean(`Variable Importance`), 
+                   CI_lo = quantile(`Variable Importance`,0.05),
+                   CI_hi = quantile(`Variable Importance`,0.95)) 
+
+quantiles_95 <- function(x) {
+  r <- quantile(x, probs=c(0.05, 0.25, 0.5, 0.75, 0.95))
+  names(r) <- c("ymin", "lower", "middle", "upper", "ymax")
+  r
+}
+
+
+pdf("variable_importance.pdf",width = 12,height =8)
+ggplot(df2, aes(x=Covariate, y=mean, group=Covariate, color=Covariate)) + 
+  # geom_line(size = 2) +
+  theme_bw( ) +
+  geom_hline(yintercept = 0:4/10,col = "darkgray",linetype = "dashed")+
+  geom_errorbar(aes(ymin=CI_lo  , ymax=CI_hi), width=.3,
+                position=position_dodge(0.05),size = .7) +
+  geom_point(size = 3.5)+
+  
+  theme(axis.text.x = element_text(angle = 300, vjust = .5, hjust=0))+
+  theme(axis.text=element_text(size=26),
+        #  axis.text.x = element_blank(),
+        axis.title=element_text(size=26),
+        legend.position = "none")+
+  scale_fill_viridis_d(end = .75) + 
+  scale_color_viridis_d(end = .75) +
+  labs(x="", y = "Variable Importance")
+dev.off()
+
+
+####### ####### ####### ####### ####### ####### ####### 
+####### Plot Function f
+####### ####### ####### ####### ####### ####### ####### 
+
+plot_function_all = function(i){
+  
+  bet_now = t(beta_samps[,(df_use*(i -1)+ 1):(df_use*i)])
+  
+  if(i < p /df_use){
+    
+    
+    xb_el = I_spline_bases[,(df_use*(i-1)+ 1):(df_use*i)] %*% bet_now
+    
+    ylab = bquote(alpha[k] ~ f[k]*"(" * .(names(X)[i]) * ")")
+    
+    el_order = sort.int(unlist(X[,i ]),index.return = TRUE)$ix
+    par(mar = c(6,6,1,1))
+    plot(unlist(X[,i ])[el_order], apply(xb_el,1,mean)[el_order],lwd = 2,
+         type = "l",ylab = ylab,
+         xlab = names(X)[i],
+         ylim = c(0,0.4),cex.lab = 3,
+         cex.axis = 2)
+    
+    lines(unlist(X[,i])[el_order], apply(xb_el,1,quantile,0.05)[el_order],
+          type = "l",lwd = 2,col = "gray",lty =2)
+    lines(unlist(X[,i ])[el_order], apply(xb_el,1,quantile,0.95)[el_order],
+          type = "l",lwd = 2,col = "gray",lty =2)
+  } else{
+    
+    set.seed(1)
+    idx_use = sample(nrow(X_GDM),500)
+    dist_use = vec_distance[idx_use]
+    
+    xb_el = X_GDM[idx_use,(df_use*(i-1)+ 1):(df_use*i)] %*% bet_now
+    
+    el_order = sort.int(dist_use,index.return = TRUE)$ix
+    par(mar = c(6,6,1,1))
+    
+    plot(dist_use[el_order], apply(xb_el,1,mean)[el_order],lwd = 2,
+         type = "l",ylab = expression(alpha*"f(Distance)"),xlab = "Distance (km)",
+         cex.lab = 3,cex.axis = 2,
+         ylim = c(0,0.4))
+    
+    lines(dist_use[el_order], apply(xb_el,1,quantile,0.05)[el_order],
+          type = "l",lwd = 2,col = "gray",lty =2)
+    lines(dist_use[el_order], apply(xb_el,1,quantile,0.95)[el_order],
+          type = "l",lwd = 2,col = "gray",lty =2)
+    
+  }
+  
+  out = max(apply(xb_el,1,mean)[el_order])
+  return(out)
+}
+
+
+plot_function_all(1)
+plot_function_all(2)
+ plot_function_all(3)
+
+
