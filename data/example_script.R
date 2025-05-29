@@ -9,8 +9,8 @@ rm(list = ls())
 # load in and parse data
 #----------------------------------------------------------------
 
-panama_data = read.csv("../../data/Panama_species.csv")[,-1]
-panama_env = read.csv("../../data/Panama_env.csv")
+panama_data = read.csv("Panama_species.csv")[,-1]
+panama_env = read.csv("Panama_env.csv")
 
 # Parse data into location, environmental variables, and cover/presence data
 
